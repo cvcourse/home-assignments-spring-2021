@@ -46,12 +46,15 @@ class _CornerStorageBuilder:
         return StorageImpl(item[1] for item in sorted(self._corners.items()))
 
 
-def _merge_corners(corner_points, new_corner_points, maxCorners):
-    new_corner_points = np.array([i for i in new_corner_points if i not in corner_points]) # todo
+def _distance_to_point(points, point, minDistance):
+    distances = (points - point) ** 2
+    return distances[distances > minDistance ** 2]
 
-    corner_points = np.concatenate((corner_points, new_corner_points), axis=0)
-    
-    np.random.shuffle(corner_points)
+def _merge_corners(corner_points, new_corner_points, maxCorners, minDistance):
+    new_corners_dist = np.array([_distance_to_point(corner_points, point, minDistance).shape[0] > 0 for point in new_corner_points])
+    new_corner_points = new_corner_points[new_corners_dist]
+
+    corner_points = np.concatenate((corner_points, new_corner_points.reshape((-1, 2))), axis=0)
     return corner_points[:maxCorners]
 
 
@@ -62,8 +65,8 @@ def _build_impl(frame_sequence: pims.FramesSequence,
 
     maxCorners = image_0.shape[0] * image_0.shape[1] // 1000
     qualityLevel = 0.01
-    minDistance = 10
-    blockSize = 7
+    minDistance = 5
+    blockSize = 10
 
     corner_points = cv2.goodFeaturesToTrack(image_0, maxCorners, qualityLevel, minDistance, blockSize = blockSize)
     ids = np.arange(0, corner_points.shape[0], 1).reshape((-1, 1))
@@ -88,18 +91,22 @@ def _build_impl(frame_sequence: pims.FramesSequence,
          winSize = (blockSize, blockSize), maxLevel = maxLevel, criteria = criteria)
 
         corner_points = nextPts[status == 1]
-        
+        ids = ids[status == 1]
+
         new_corner_points = cv2.goodFeaturesToTrack(image_1, maxCorners, qualityLevel, minDistance, blockSize = blockSize)
-        corner_points = _merge_corners(nextPts, new_corner_points, maxCorners)
-        ids = np.arange(0, corner_points.shape[0], 1).reshape((-1, 1)) # todo
+        corner_points = _merge_corners(corner_points, new_corner_points, maxCorners, minDistance)
         sizes = np.full((corner_points.shape[0], 2), blockSize)
-        
+
+        new_ids = np.arange(ids.shape[0], corner_points.shape[0], 1).reshape((-1, 1))
+        ids = np.concatenate((ids.reshape((-1, 1)), new_ids))
+
         corners = FrameCorners(
             ids,
             corner_points,
             sizes
         )
 
+        corner_points = corner_points.reshape((-1, 1, 2))
         builder.set_corners_at_frame(frame, corners)
         image_0 = image_1
 
