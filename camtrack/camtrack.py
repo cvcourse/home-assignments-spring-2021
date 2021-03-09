@@ -25,15 +25,15 @@ from _camtrack import (
     rodrigues_and_translation_to_view_mat3x4
 )
 
-def triangulate(ind_1, ind_2, pose_1, pose_2, corner_storage, intrinsic_mat, parameters = TriangulationParameters(8.0, 0, 2)):
-    frame_corners_1, frame_corners_2 = map(corner_storage.__getitem__, [ind_1, ind_2])
-    correspondences = build_correspondences(frame_corners_1, frame_corners_2)
-    view_1, view_2 = map(pose_to_view_mat3x4, [pose_1, pose_2])
+def triangulate(ind_1, ind_2, pose_1, pose_2, corner_storage, intrinsic_mat, ids_to_remove, parameters = TriangulationParameters(8.0, 0, 2)):
+    frame_corners_1, frame_corners_2 = corner_storage[ind_1], corner_storage[ind_2]
+    correspondences = build_correspondences(frame_corners_1, frame_corners_2, ids_to_remove)
+    view_1, view_2 = pose_to_view_mat3x4(pose_1), pose_to_view_mat3x4(pose_2)
     return triangulate_correspondences(correspondences, view_1, view_2, intrinsic_mat, parameters)
 
 
 def camera_pose(id, corner_storage, point_cloud_builder, intrinsic_mat, dist_coef = None):
-    frame_corners = corner_storage.__getitem__(id)
+    frame_corners = corner_storage[id]
     points = frame_corners.points
     frame_ids = frame_corners.ids
     cloud_ids = point_cloud_builder.ids
@@ -46,13 +46,17 @@ def camera_pose(id, corner_storage, point_cloud_builder, intrinsic_mat, dist_coe
     retval, rvec, tvec, inliers = cv2.solvePnPRansac(cloud_points, frame_points, intrinsic_mat, dist_coef)
     if retval is None:
         return None
-    return view_mat3x4_to_pose(rodrigues_and_translation_to_view_mat3x4(rvec, tvec))
+    retval, rvec, tvec = cv2.solvePnP(cloud_points[inliers], frame_points[inliers], intrinsic_mat, dist_coef)
+    if retval is None:
+        return None 
+    return view_mat3x4_to_pose(rodrigues_and_translation_to_view_mat3x4(rvec, tvec)), np.setdiff1d(ids, inliers)
 
 
-def recalculate_poses(used, used_pose, point_cloud_builder, corner_storage, intrinsic_mat):
+def recalculate_poses(used, point_cloud_builder, corner_storage, intrinsic_mat):
     new_poses = []
-    for (id, pose) in zip(used, used_pose):
-        new_poses.append(camera_pose(id, corner_storage, point_cloud_builder, intrinsic_mat))
+    for id in used:
+        new_pose, _ = camera_pose(id, corner_storage, point_cloud_builder, intrinsic_mat)
+        new_poses.append(new_pose)
     return new_poses
 
 
@@ -71,26 +75,24 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
         rgb_sequence[0].shape[0]
     )
 
-    frames_cnt = rgb_sequence.__len__()
-    known_ids = [known_view_1[0], known_view_2[0]]
-    known_poses = [known_view_1[1], known_view_2[1]]
-    unused = np.array([i for i in range(0, frames_cnt) if i not in known_ids])
+    frames_cnt = len(rgb_sequence)
+    unused = np.array([i for i in range(0, frames_cnt) if i not in [known_view_1[0], known_view_2[0]]])
     used = np.array([known_view_1[0], known_view_2[0]])
-    used_pose = known_poses
+    used_pose = [known_view_1[1], known_view_2[1]]
 
-    points, ids, cos = triangulate(known_ids[0], known_ids[1], known_poses[0], known_poses[1], corner_storage, intrinsic_mat)
+    points, ids, cos = triangulate(known_view_1[0], known_view_2[0], known_view_1[1], known_view_2[1], corner_storage, intrinsic_mat, None) 
     point_cloud_builder = PointCloudBuilder(ids, points)
     # print("Add frames", *known_ids)
 
     while unused.shape[0] > 0:
         added = []
         for i in range(len(unused)):
-            pose_i = camera_pose(unused[i], corner_storage, point_cloud_builder, intrinsic_mat)
+            pose_i, ids_to_remove = camera_pose(unused[i], corner_storage, point_cloud_builder, intrinsic_mat)
             if pose_i is None:
                 continue
 
             for j in range(len(used)):
-                points, ids, cos = triangulate(unused[i], used[j], pose_i, used_pose[j], corner_storage, intrinsic_mat)
+                points, ids, cos = triangulate(unused[i], used[j], pose_i, used_pose[j], corner_storage, intrinsic_mat, ids_to_remove)
                 point_cloud_builder.add_points(ids, points)
 
             used = np.append(used, [unused[i]])
@@ -102,7 +104,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
             break
         unused = np.setdiff1d(unused, added)
 
-        used_pose = recalculate_poses(used, used_pose, point_cloud_builder, corner_storage, intrinsic_mat)
+        used_pose = recalculate_poses(used, point_cloud_builder, corner_storage, intrinsic_mat)
 
     view_mats = [None for i in range(frames_cnt)]
     for i in range(len(used)):
