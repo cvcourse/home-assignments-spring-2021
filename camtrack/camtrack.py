@@ -37,13 +37,12 @@ def camera_pose(id, corner_storage, point_cloud_builder, intrinsic_mat, dist_coe
     points = frame_corners.points
     frame_ids = frame_corners.ids
     cloud_ids = point_cloud_builder.ids
-    ids = np.intersect1d(frame_ids, cloud_ids)
+    ids, frame_indexes, cloud_indexes = np.intersect1d(frame_ids, cloud_ids, return_indices=True)
     if ids.shape[0] < 4:
         return None 
     
-    filter_ids = np.vectorize(lambda x: x in ids)
-    cloud_points = point_cloud_builder.points[filter_ids(cloud_ids.reshape((-1)))]
-    frame_points = points[filter_ids(frame_ids.reshape((-1)))]
+    cloud_points = point_cloud_builder.points[cloud_indexes]
+    frame_points = points[frame_indexes]
     retval, rvec, tvec, inliers = cv2.solvePnPRansac(cloud_points, frame_points, intrinsic_mat, dist_coef)
     if retval is None:
         return None
@@ -96,7 +95,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
 
             used = np.append(used, [unused[i]])
             used_pose.append(pose_i)
-            added.append(i)
+            added.append(unused[i])
             # print("Frame", unused[i], "done!!")
 
         if len(added) == 0:
