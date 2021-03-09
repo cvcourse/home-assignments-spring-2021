@@ -79,6 +79,11 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
                                                                  flags=method)
                 if not retval:
                     continue
+                retval, rvec, tvec = cv2.solvePnP(points_3d[inliers], points_2d[inliers], intrinsic_mat, None,
+                                                  rvec=rvec, tvec=tvec, useExtrinsicGuess=True)
+                if not retval:
+                    continue
+
                 view_mats[i] = rodrigues_and_translation_to_view_mat3x4(rvec, tvec)
                 unknown_frames -= 1
                 known_frames.add(i)
