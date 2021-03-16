@@ -28,6 +28,7 @@ from _camtrack import (
 
 
 def calc_known_views(corner_storage: CornerStorage, intrinsic_mat):
+    print('Start first views search')
     frame_count = len(corner_storage)
 
     best_size = 0
@@ -36,6 +37,7 @@ def calc_known_views(corner_storage: CornerStorage, intrinsic_mat):
     best_view = None
     for i in range(0, frame_count - 1, 3): # (frame_count - 1):
         for j in range(i + 1, min(i + 100, frame_count), 2):
+            print('Try {} and {} as first views'.format(i, j))
             correspondences = build_correspondences(corner_storage[i], corner_storage[j], None)
             if len(correspondences) == 0:
                 continue
@@ -108,6 +110,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
     while unknown_frames > 0:
         for i in range(frame_count):
             if view_mats[i] is None:
+                print('Frame {} in process'.format(i))
                 corners = corner_storage[i]
                 interesting_ids, in_corners, in_cloud = np.intersect1d(corners.ids.flatten(), point_cloud_builder.ids.flatten(), return_indices=True)
                 points_2d = corners.points[in_corners]
@@ -121,6 +124,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
                     method = cv2.SOLVEPNP_P3P
                 retval, rvec, tvec, inliers = cv2.solvePnPRansac(points_3d, points_2d, intrinsic_mat, None,
                                                                  flags=method)
+                print('got inliers: {}'.format(len(inliers)))
                 if not retval:
                     continue
                 retval, rvec, tvec = cv2.solvePnP(points_3d[inliers], points_2d[inliers], intrinsic_mat, None,
@@ -130,6 +134,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
 
                 view_mats[i] = rodrigues_and_translation_to_view_mat3x4(rvec, tvec)
                 unknown_frames -= 1
+                print('Unknown frames number: {}/{}'.format(unknown_frames, frame_count))
                 known_frames.add(i)
 
                 outliers = np.delete(interesting_ids, inliers)
@@ -138,6 +143,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
                     points_3d, corner_ids, _ = triangulate_correspondences(
                         correspondences, view_mats[i], view_mats[frame], intrinsic_mat, triangulation_parameters)
                     point_cloud_builder.add_points(corner_ids, points_3d)
+                    print('Point cloud size: {} points'.format(len(point_cloud_builder.ids)))
 
 
 
