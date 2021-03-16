@@ -22,8 +22,47 @@ from _camtrack import (
     build_correspondences,
     triangulate_correspondences,
     TriangulationParameters,
-    rodrigues_and_translation_to_view_mat3x4
+    rodrigues_and_translation_to_view_mat3x4,
+    eye3x4
 )
+
+
+def calc_known_views(corner_storage: CornerStorage, intrinsic_mat):
+    frame_count = len(corner_storage)
+
+    best_size = 0
+    known_view_1_id = 0
+    known_view_2_id = 1
+    best_view = None
+    for i in range(0, frame_count - 1, 3): # (frame_count - 1):
+        for j in range(i + 1, min(i + 100, frame_count), 2):
+            correspondences = build_correspondences(corner_storage[i], corner_storage[j], None)
+            if len(correspondences) == 0:
+                continue
+            H, h_mask = cv2.findHomography(correspondences.points_1, correspondences.points_2,
+                                           method=cv2.RANSAC, ransacReprojThreshold=2, confidence=0.99)
+            E, e_mask = cv2.findEssentialMat(correspondences.points_1, correspondences.points_2,
+                                           intrinsic_mat, method=cv2.RANSAC, prob=0.99, threshold=1)
+            if h_mask.reshape(-1).sum() > 0.7 * e_mask.reshape(-1).sum():
+                continue
+            R1, R2, t = cv2.decomposeEssentialMat(E)
+            views = [np.hstack((R1, t)),
+                         np.hstack((R1, -t)),
+                         np.hstack((R2, t)),
+                         np.hstack((R2, -t))]
+
+            correspondences = build_correspondences(corner_storage[i], corner_storage[j], np.where(e_mask == 0)[0])
+
+            for view in views:
+                points, ids, _ = triangulate_correspondences(correspondences, eye3x4(), view,
+                                                             intrinsic_mat, TriangulationParameters(0.2, 5, 0))
+                if len(ids) > best_size:
+                    best_size = len(ids)
+                    known_view_1_id = i
+                    known_view_2_id = j
+                    best_view = view
+
+    return (known_view_1_id, eye3x4()), (known_view_2_id, best_view)
 
 
 def track_and_calc_colors(camera_parameters: CameraParameters,
@@ -32,8 +71,6 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
                           known_view_1: Optional[Tuple[int, Pose]] = None,
                           known_view_2: Optional[Tuple[int, Pose]] = None) \
         -> Tuple[List[Pose], PointCloud]:
-    if known_view_1 is None or known_view_2 is None:
-        raise NotImplementedError()
 
     rgb_sequence = frameseq.read_rgb_f32(frame_sequence_path)
     intrinsic_mat = to_opencv_camera_mat3x3(
@@ -41,11 +78,18 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
         rgb_sequence[0].shape[0]
     )
 
-    # TODO: implement
     frame_count = len(corner_storage)
     view_mats = [None] * frame_count
-    view_1_id, view_1 = known_view_1[0], pose_to_view_mat3x4(known_view_1[1])
-    view_2_id, view_2 = known_view_2[0], pose_to_view_mat3x4(known_view_2[1])
+
+    view_1_id, view_1 = None, None
+    view_2_id, view_2 = None, None
+    if known_view_1 is None or known_view_2 is None:
+        known_view_1, known_view_2 = calc_known_views(corner_storage, intrinsic_mat)
+        view_1_id, view_1 = known_view_1[0], known_view_1[1]
+        view_2_id, view_2 = known_view_2[0], known_view_2[1]
+    else:
+        view_1_id, view_1 = known_view_1[0], pose_to_view_mat3x4(known_view_1[1])
+        view_2_id, view_2 = known_view_2[0], pose_to_view_mat3x4(known_view_2[1])
 
     view_mats[view_1_id] = view_1
     view_mats[view_2_id] = view_2

@@ -51,7 +51,7 @@ def _build_impl(frame_sequence: pims.FramesSequence,
     image_0 = frame_sequence[0]
 
     points = cv2.goodFeaturesToTrack(image_0,
-                                     maxCorners=5000, qualityLevel=0.001, minDistance=10, blockSize=10).squeeze(1)
+                                     maxCorners=2000, qualityLevel=0.001, minDistance=10, blockSize=10).squeeze(1)
     ids = np.array(range(len(points)));
     sizes = np.array([10] * len(points))
     corners = FrameCorners(ids, points, sizes)
@@ -67,14 +67,14 @@ def _build_impl(frame_sequence: pims.FramesSequence,
         tracked_points = tracked_points[status == 1]
         tracked_ids = ids[status == 1]
 
-        new_points = cv2.goodFeaturesToTrack(image_1, maxCorners=5000, qualityLevel=0.001, minDistance=10, blockSize=10).squeeze(1)
+        new_points = cv2.goodFeaturesToTrack(image_1, maxCorners=2000, qualityLevel=0.001, minDistance=10, blockSize=10).squeeze(1)
         dist = np.linalg.norm(tracked_points[None, :] - new_points[:, None], axis=2)
         new_points = new_points[np.min(dist, axis=1) >= 10, :]
         new_ids = np.array(range(corners_count, corners_count + len(new_points)), dtype=np.int32);
         corners_count += len(new_points)
         tracked_points = np.concatenate((tracked_points, new_points))
 
-        points = tracked_points[:min(5000, len(tracked_points))]
+        points = tracked_points[:min(2000, len(tracked_points))]
         ids = np.append(tracked_ids, new_ids, axis=0)[:len(points)]
         sizes = np.array([10] * len(points))
         corners = FrameCorners(ids, points, sizes)
